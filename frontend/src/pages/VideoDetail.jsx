@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getVideo, processVideo, processDirect, autoClip, manualClip, clipDirect, splitClip, getClips, videoStreamUrl, clipStreamUrl } from '../api';
+import {
+  getVideo, processVideo, processDirect, processVideoBackground,
+  autoClip, manualClip, clipDirect, splitClip,
+  getClips, deleteClip, videoStreamUrl, clipStreamUrl,
+  smartCropClip, analyzeViral
+} from '../api';
 
 export default function VideoDetail() {
   const { id } = useParams();
@@ -18,14 +23,28 @@ export default function VideoDetail() {
   const [splitLength, setSplitLength] = useState(30);
   const [splitOverlap, setSplitOverlap] = useState(0.5);
 
+  // Smart crop
+  const [smartStart, setSmartStart] = useState('');
+  const [smartEnd, setSmartEnd] = useState('');
+  const [smartQuality, setSmartQuality] = useState('balanced');
+
+  // Viral analysis
+  const [viralLoading, setViralLoading] = useState(false);
+  const [viralClips, setViralClips] = useState([]);
+
   const isDirect = video?.source === 'youtube_direct';
 
   const load = async () => {
-    const data = await getVideo(id);
-    setVideo(data);
-    const c = await getClips(id);
-    setClips(c);
-    setLoading(false);
+    try {
+      const data = await getVideo(id);
+      setVideo(data);
+      const c = await getClips(id);
+      setClips(c.clips || c);
+    } catch (e) {
+      console.error('Failed to load video data:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, [id]);
@@ -39,6 +58,23 @@ export default function VideoDetail() {
         await processVideo(id);
       }
       load();
+    } catch (e) { alert('Error: ' + e.message); }
+    setProcessing(false);
+  };
+
+  const handleProcessBg = async () => {
+    setProcessing(true);
+    try {
+      await processVideoBackground(id);
+      alert('Processing started in background. Check back in a few seconds.');
+      // Poll for completion
+      const poll = setInterval(async () => {
+        const v = await getVideo(id);
+        if (v.status === 'ready' || v.status === 'error') {
+          clearInterval(poll);
+          load();
+        }
+      }, 3000);
     } catch (e) { alert('Error: ' + e.message); }
     setProcessing(false);
   };
@@ -78,6 +114,39 @@ export default function VideoDetail() {
       load();
     } catch (e) { alert('Error: ' + e.message); }
     setClipping(false);
+  };
+
+  // 🆕 Smart Crop
+  const handleSmartCrop = async () => {
+    const start = parseFloat(smartStart);
+    const end = parseFloat(smartEnd);
+    if (isNaN(start) || isNaN(end) || start >= end) {
+      alert('Enter valid start and end times');
+      return;
+    }
+    setClipping(true);
+    try {
+      await smartCropClip(id, start, end, smartQuality);
+      load();
+    } catch (e) { alert('Smart crop failed: ' + e.message); }
+    setClipping(false);
+  };
+
+  // 🆕 Viral Analysis
+  const handleViralAnalysis = async () => {
+    setViralLoading(true);
+    try {
+      const result = await analyzeViral(id);
+      setViralClips(result.clips || []);
+      alert(`Found ${result.count} viral-worthy segments!`);
+    } catch (e) { alert('Analysis failed: ' + e.message); }
+    setViralLoading(false);
+  };
+
+  const handleDeleteClip = async (clipId) => {
+    if (!confirm('Delete this clip?')) return;
+    await deleteClip(clipId);
+    load();
   };
 
   const formatTime = (s) => {
@@ -137,14 +206,24 @@ export default function VideoDetail() {
           <h2 className="font-semibold mb-3">⚙️ Actions</h2>
           <div className="flex flex-wrap gap-2">
             {video.status !== 'ready' && (
-              <button onClick={handleProcess} disabled={processing} className="btn">
-                {processing ? 'Processing...' : isDirect ? '🔊 Transcribe Audio Only' : '🔊 Transcribe & Analyze'}
-              </button>
+              <>
+                <button onClick={handleProcess} disabled={processing} className="btn">
+                  {processing ? 'Processing...' : isDirect ? '🔊 Transcribe (Sync)' : '🔊 Transcribe & Analyze'}
+                </button>
+                <button onClick={handleProcessBg} disabled={processing} className="btn bg-violet-600 hover:bg-violet-500">
+                  {processing ? 'Starting...' : '⚡ Process in Background'}
+                </button>
+              </>
             )}
             {video.status === 'ready' && (
-              <button onClick={handleAutoClip} disabled={clipping} className="btn">
-                {clipping ? 'Clipping...' : '🤖 Auto Clips'}
-              </button>
+              <>
+                <button onClick={handleAutoClip} disabled={clipping} className="btn">
+                  {clipping ? 'Clipping...' : '🤖 Auto Clips'}
+                </button>
+                <button onClick={handleViralAnalysis} disabled={viralLoading} className="btn bg-pink-600 hover:bg-pink-500">
+                  {viralLoading ? 'Analyzing...' : '🔥 AI Viral Analysis'}
+                </button>
+              </>
             )}
           </div>
           {isDirect && (
@@ -152,13 +231,43 @@ export default function VideoDetail() {
           )}
         </div>
 
+        {/* 🆕 Viral Analysis Results */}
+        {viralClips.length > 0 && (
+          <div className="card mb-4">
+            <h2 className="font-semibold mb-3">🔥 AI Viral Analysis</h2>
+            <div className="space-y-2">
+              {viralClips.map((vc, i) => (
+                <div key={i} className="bg-pink-500/10 border border-pink-500/30 rounded-lg p-3">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-xs text-pink-400 font-mono">
+                      {formatTime(vc.start)} → {formatTime(vc.end)}
+                    </span>
+                    <span className="badge bg-pink-500/20 text-pink-300 text-xs">
+                      Score: {vc.score}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-200">{vc.title}</p>
+                  <p className="text-xs text-slate-400 mt-1">{vc.description}</p>
+                  <button
+                    onClick={() => { setSmartStart(String(vc.start)); setSmartEnd(String(vc.end)); }}
+                    className="text-xs text-violet-400 hover:text-violet-300 mt-1"
+                  >
+                    → Use in Smart Crop
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Transcript */}
         {video.transcript && (
           <div className="card mb-4">
             <h2 className="font-semibold mb-3">📝 Transcript</h2>
             <div className="max-h-60 overflow-y-auto text-sm text-slate-300 space-y-1">
               {video.transcript.segments?.map((seg, i) => (
-                <p key={i} className="hover:bg-slate-700/50 p-1 rounded">
+                <p key={i} className="hover:bg-slate-700/50 p-1 rounded cursor-pointer"
+                  onClick={() => { setManualStart(String(seg.start)); setManualEnd(String(seg.end)); }}>
                   <span className="text-violet-400 text-xs">{formatTime(seg.start)}</span>
                   {' '}{seg.text}
                 </p>
@@ -170,7 +279,7 @@ export default function VideoDetail() {
         {/* Detected Moments */}
         {moments.length > 0 && (
           <div className="card">
-            <h2 className="font-semibold mb-3">🔥 Detected Moments</h2>
+            <h2 className="font-semibold mb-3">🎯 Detected Moments</h2>
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {moments.map((m, i) => (
                 <div key={i} className="bg-slate-800 border border-slate-700 rounded-lg p-3">
@@ -209,6 +318,24 @@ export default function VideoDetail() {
           </button>
         </div>
 
+        {/* 🆕 Smart Crop (YOLOv8) */}
+        <div className="card mb-4">
+          <h2 className="font-semibold mb-3">🎯 Smart Crop (YOLOv8)</h2>
+          <p className="text-xs text-slate-400 mb-2">AI-powered content-aware cropping that tracks the subject</p>
+          <div className="flex gap-2 mb-2">
+            <input className="input" placeholder="Start (s)" value={smartStart} onChange={e => setSmartStart(e.target.value)} />
+            <input className="input" placeholder="End (s)" value={smartEnd} onChange={e => setSmartEnd(e.target.value)} />
+          </div>
+          <select value={smartQuality} onChange={e => setSmartQuality(e.target.value)} className="input w-full mb-2">
+            <option value="draft">⚡ Draft (fast)</option>
+            <option value="balanced">⚖️ Balanced</option>
+            <option value="high">✨ High Quality</option>
+          </select>
+          <button onClick={handleSmartCrop} disabled={clipping} className="btn w-full bg-amber-600 hover:bg-amber-500">
+            {clipping ? 'Processing...' : '🎯 Smart Crop'}
+          </button>
+        </div>
+
         {/* Split Clip */}
         <div className="card mb-4">
           <h2 className="font-semibold mb-3">🔀 Split into Reels</h2>
@@ -236,10 +363,14 @@ export default function VideoDetail() {
               <div key={c.id} className="bg-slate-800 rounded-lg overflow-hidden border border-slate-700">
                 <video src={clipStreamUrl(c.id)} className="w-full aspect-[9/16] bg-black object-cover" controls preload="metadata" />
                 <div className="p-2">
-                  <p className="text-xs text-slate-400 font-mono">{formatTime(c.start)} → {formatTime(c.end)}</p>
+                  <p className="text-xs text-slate-400 font-mono">
+                    {formatTime(c.start)} → {formatTime(c.end)}
+                    {c.mode && <span className="ml-2 badge bg-slate-600 text-xs">{c.mode}</span>}
+                  </p>
                   <div className="flex gap-1 mt-1">
                     <Link to={`/clip/${c.id}`} className="btn text-xs py-1 px-3 flex-1 text-center">Edit</Link>
-                    <Link to={`/clip/${c.id}/thumbnail`} className="btn text-xs py-1 px-3 flex-1 text-center bg-emerald-600 hover:bg-emerald-500">Thumbnail</Link>
+                    <Link to={`/clip/${c.id}/thumbnail`} className="btn text-xs py-1 px-3 flex-1 text-center bg-emerald-600 hover:bg-emerald-500">🖼</Link>
+                    <button onClick={() => handleDeleteClip(c.id)} className="btn text-xs py-1 px-3 bg-red-600 hover:bg-red-500">🗑</button>
                   </div>
                 </div>
               </div>

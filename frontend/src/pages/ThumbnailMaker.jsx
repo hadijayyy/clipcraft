@@ -9,6 +9,7 @@ export default function ThumbnailMaker() {
   const [seekTime, setSeekTime] = useState(0.5);
   const [thumbUrl, setThumbUrl] = useState('');
   const [loading, setLoading] = useState(false);
+  const [clipDuration, setClipDuration] = useState(60);
 
   const handleSeek = (t) => {
     setSeekTime(t);
@@ -46,10 +47,10 @@ export default function ThumbnailMaker() {
   };
 
   const downloadThumb = () => {
-    if (!canvasRef.current) return;
+    if (!thumbUrl) return;
     const link = document.createElement('a');
     link.download = `clip_${id}_thumb.jpg`;
-    link.href = canvasRef.current.toDataURL('image/jpeg', 0.9);
+    link.href = thumbUrl;
     link.click();
   };
 
@@ -69,7 +70,10 @@ export default function ThumbnailMaker() {
             controls
             preload="auto"
             onLoadedMetadata={() => {
-              if (videoRef.current) videoRef.current.currentTime = seekTime;
+              if (videoRef.current) {
+                videoRef.current.currentTime = seekTime;
+                setClipDuration(Math.ceil(videoRef.current.duration) || 60);
+              }
             }}
           />
         </div>
@@ -79,7 +83,7 @@ export default function ThumbnailMaker() {
           <input
             type="range"
             min="0"
-            max="60"
+            max={clipDuration}
             step="0.1"
             value={seekTime}
             onChange={e => handleSeek(Number(e.target.value))}
@@ -87,7 +91,7 @@ export default function ThumbnailMaker() {
           />
           <div className="flex justify-between text-xs text-slate-500 mt-1">
             <span>0s</span>
-            <span>60s</span>
+            <span>{clipDuration}s</span>
           </div>
         </div>
 

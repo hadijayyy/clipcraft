@@ -9,6 +9,8 @@ def analyze_moments(transcript: dict) -> list:
     
     for i, seg in enumerate(segments):
         text = seg.get("text", "").strip()
+        if not text:
+            continue
         score = 0
         types = []
         

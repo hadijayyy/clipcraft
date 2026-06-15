@@ -5,22 +5,33 @@ import { getVideos, deleteVideo, videoStreamUrl } from '../api';
 export default function Dashboard() {
   const [videos, setVideos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const LIMIT = 12;
 
-  const load = async () => {
+  const load = async (query = '', offset = 0) => {
     setLoading(true);
     try {
-      const data = await getVideos();
-      setVideos(data);
+      const data = await getVideos({ limit: LIMIT, offset, q: query || undefined });
+      setVideos(data.videos);
+      setTotal(data.total);
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setPage(0);
+    load(search, 0);
+  };
+
   const handleDelete = async (id) => {
-    if (!confirm('Hapus video ini?')) return;
+    if (!confirm('Delete this video?')) return;
     await deleteVideo(id);
-    load();
+    load(search, page);
   };
 
   const fmtDur = (s) => {
@@ -30,25 +41,46 @@ export default function Dashboard() {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  const totalPages = Math.ceil(total / LIMIT);
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Video Library</h1>
+        <h1 className="text-2xl font-bold">🎬 Video Library</h1>
         <Link to="/upload" className="btn">+ Upload</Link>
       </div>
+
+      {/* Search + Filter */}
+      <form onSubmit={handleSearch} className="flex gap-2 mb-6">
+        <input
+          type="text"
+          placeholder="Search videos..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:border-violet-500 outline-none"
+        />
+        <button type="submit" className="btn">🔍 Search</button>
+        {search && (
+          <button type="button" onClick={() => { setSearch(''); setPage(0); load('', 0); }} className="btn bg-slate-700">
+            ✕ Clear
+          </button>
+        )}
+      </form>
 
       {loading && <p className="text-slate-400">Loading...</p>}
 
       {!loading && videos.length === 0 && (
         <div className="card text-center py-16">
           <p className="text-5xl mb-4">🎬</p>
-          <p className="text-xl text-slate-300 mb-2">No videos yet</p>
-          <p className="text-slate-400 mb-6">Upload a video or paste a YouTube link to get started</p>
-          <Link to="/upload" className="btn text-lg px-8 py-3">Upload Your First Video</Link>
+          <p className="text-xl text-slate-300 mb-2">{search ? 'No results found' : 'No videos yet'}</p>
+          <p className="text-slate-400 mb-6">
+            {search ? 'Try a different search term' : 'Upload a video or paste a YouTube link to get started'}
+          </p>
+          {!search && <Link to="/upload" className="btn text-lg px-8 py-3">Upload Your First Video</Link>}
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {videos.map(v => (
           <div key={v.id} className="card hover:border-violet-500/50 transition overflow-hidden">
             <div className="relative aspect-video bg-slate-800 rounded-lg mb-3 overflow-hidden">
@@ -83,6 +115,29 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex justify-center items-center gap-4 mt-6">
+          <button
+            onClick={() => { const p = page - 1; setPage(p); load(search, p * LIMIT); }}
+            disabled={page === 0}
+            className="btn disabled:opacity-30"
+          >
+            ← Prev
+          </button>
+          <span className="text-slate-400 text-sm">
+            Page {page + 1} of {totalPages} ({total} videos)
+          </span>
+          <button
+            onClick={() => { const p = page + 1; setPage(p); load(search, p * LIMIT); }}
+            disabled={page >= totalPages - 1}
+            className="btn disabled:opacity-30"
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

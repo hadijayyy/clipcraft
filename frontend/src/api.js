@@ -1,4 +1,4 @@
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+const API = import.meta.env.VITE_API_URL || 'https://43-157-200-187.sslip.io';
 
 async function req(path, options = {}) {
   const url = `${API}${path}`;
@@ -17,6 +17,10 @@ export async function uploadVideo(file, onProgress) {
   const form = new FormData();
   form.append('file', file);
   const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(text || `Upload failed: HTTP ${res.status}`);
+  }
   const data = await res.json();
   if (onProgress) onProgress(100);
   return data;
@@ -26,6 +30,17 @@ export async function importYoutube(url) {
   const form = new FormData();
   form.append('url', url);
   return req('/api/youtube', { method: 'POST', body: form });
+}
+
+// ─── YouTube Cookies ─────────────────────────────────────
+export async function uploadYoutubeCookies(file) {
+  const form = new FormData();
+  form.append('cookies', file);
+  return req('/api/youtube/cookies', { method: 'POST', body: form });
+}
+
+export async function deleteYoutubeCookies() {
+  return req('/api/youtube/cookies', { method: 'DELETE' });
 }
 
 export async function importYoutubeDirect(url) {
@@ -49,8 +64,69 @@ export async function processVideo(id) {
   return req(`/api/process/${id}`, { method: 'POST' });
 }
 
-export async function getVideos() {
-  return req('/api/videos');
+export async function getVideos({ limit = 50, offset = 0, q, source, status } = {}) {
+  const params = new URLSearchParams();
+  params.set('limit', limit);
+  params.set('offset', offset);
+  if (q) params.set('q', q);
+  if (source) params.set('source', source);
+  if (status) params.set('status', status);
+  return req(`/api/videos?${params.toString()}`);
+}
+
+export async function searchVideos(query) {
+  return req(`/api/videos?q=${encodeURIComponent(query)}`);
+}
+
+// ─── Smart Crop ──────────────────────────────────────────
+export async function smartCropClip(videoId, start, end, quality = 'balanced') {
+  const form = new FormData();
+  form.append('start', String(start));
+  form.append('end', String(end));
+  form.append('quality', quality);
+  return req(`/api/clip/smart/${videoId}`, { method: 'POST', body: form });
+}
+
+// ─── Viral Analysis ──────────────────────────────────────
+export async function analyzeViral(videoId) {
+  return req(`/api/analyze/viral/${videoId}`, { method: 'POST' });
+}
+
+// ─── Export Formats ──────────────────────────────────────
+export async function getExportFormats() {
+  return req('/api/export/formats');
+}
+
+export async function exportClip(clipId, format = '9:16') {
+  const form = new FormData();
+  form.append('format', format);
+  return req(`/api/clip/export/${clipId}`, { method: 'POST', body: form });
+}
+
+// ─── Translation ─────────────────────────────────────────
+export async function getSupportedLanguages() {
+  return req('/api/translate/languages');
+}
+
+export async function translateClip(clipId, targetLang = 'id') {
+  const form = new FormData();
+  form.append('target_lang', targetLang);
+  return req(`/api/clip/${clipId}/translate`, { method: 'POST', body: form });
+}
+
+// ─── Social Publishing ───────────────────────────────────
+export async function publishClip(clipId, { platform, title = '', description = '', tags = '' }) {
+  const form = new FormData();
+  form.append('platform', platform);
+  form.append('title', title);
+  form.append('description', description);
+  form.append('tags', tags);
+  return req(`/api/publish/${clipId}`, { method: 'POST', body: form });
+}
+
+// ─── Background Processing ───────────────────────────────
+export async function processVideoBackground(id) {
+  return req(`/api/process-bg/${id}`, { method: 'POST' });
 }
 
 export async function getVideo(id) {

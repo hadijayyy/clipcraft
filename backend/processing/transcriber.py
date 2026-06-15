@@ -10,19 +10,39 @@ AUDIO_DIR = os.path.join(STORAGE_DIR, "audio")
 
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
+# Whisper model singleton — load once, reuse across requests
+_whisper_model = None
+
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+    return _whisper_model
+
 
 def get_youtube_stream_url(url: str) -> str:
-    """Get direct stream URL from YouTube using yt-dlp (no download)"""
+    """Get direct stream URL from YouTube via Opencode Go API.
+    Falls back to yt-dlp if Opencode fails."""
+    try:
+        from processing.opencode import get_youtube_stream_url as opencode_get
+        return opencode_get(url)
+    except Exception as e:
+        print(f"[Opencode] Import failed: {e}, using yt-dlp fallback")
+
+    # Fallback: yt-dlp
     cmd = [
         "yt-dlp",
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "-f", "best[ext=mp4]/best",
         "--get-url",
         "--no-playlist",
         url
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip().split('\n')[0]
+        urls = [u for u in result.stdout.strip().split('\n') if u.startswith('http')]
+        return urls[0] if urls else ""
     return ""
 
 
@@ -35,7 +55,11 @@ def extract_audio_from_url(url: str, audio_id: str) -> str:
     # Get stream URL
     stream_url = get_youtube_stream_url(url)
     if not stream_url:
-        return ""
+        raise RuntimeError(
+            "YouTube blocked the request (bot detection). "
+            "Try: 1) Upload video file directly instead of URL, "
+            "or 2) Provide cookies.txt file for authentication."
+        )
 
     # Extract audio directly from stream
     cmd = [
@@ -97,8 +121,7 @@ def transcribe(audio_path: str, audio_id: str) -> dict:
             return json.load(f)
 
     try:
-        from faster_whisper import WhisperModel
-        model = WhisperModel("base", device="cpu", compute_type="int8")
+        model = _get_whisper_model()
         segments, info = model.transcribe(audio_path, language="en")
         
         result = {
@@ -129,8 +152,7 @@ def get_video_duration(video_path: str) -> float:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if result.returncode == 0:
-        import json as j
-        data = j.loads(result.stdout)
+        data = json.loads(result.stdout)
         return float(data.get("format", {}).get("duration", 0))
     return 0
 
@@ -145,8 +167,7 @@ def get_video_info(video_path: str) -> dict:
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if result.returncode == 0:
-        import json as j
-        data = j.loads(result.stdout)
+        data = json.loads(result.stdout)
         streams = data.get("streams", [{}])
         if streams:
             s = streams[0]
