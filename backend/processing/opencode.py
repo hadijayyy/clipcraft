@@ -38,14 +38,15 @@ def get_youtube_stream_url(url: str) -> str:
         except Exception as e:
             print(f"[Opencode Go] Error: {e}, falling back to yt-dlp")
 
-    # Fallback: yt-dlp (may fail on VPS due to bot detection)
+    # Fallback: yt-dlp with cookies (may fail on VPS due to bot detection)
+    cookie_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage", "cookies", "youtube_cookies.txt")
+    cookie_args = ["--cookies", cookie_path] if os.path.exists(cookie_path) else []
     cmd = [
         "yt-dlp",
         "-f", "best[ext=mp4]/best",
         "--get-url",
         "--no-playlist",
-        url
-    ]
+    ] + cookie_args + [url]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if result.returncode == 0 and result.stdout.strip():
         urls = [u for u in result.stdout.strip().split('\n') if u.startswith('http')]

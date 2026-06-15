@@ -22,6 +22,14 @@ def _get_whisper_model():
     return _whisper_model
 
 
+def _get_cookie_args() -> list:
+    """Get cookie args for yt-dlp if saved cookies exist."""
+    cookie_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage", "cookies", "youtube_cookies.txt")
+    if os.path.exists(cookie_path):
+        return ["--cookies", cookie_path]
+    return []
+
+
 def get_youtube_stream_url(url: str) -> str:
     """Get direct stream URL from YouTube via Opencode Go API.
     Falls back to yt-dlp if Opencode fails."""
@@ -31,14 +39,13 @@ def get_youtube_stream_url(url: str) -> str:
     except Exception as e:
         print(f"[Opencode] Import failed: {e}, using yt-dlp fallback")
 
-    # Fallback: yt-dlp
+    # Fallback: yt-dlp with cookies
     cmd = [
         "yt-dlp",
         "-f", "best[ext=mp4]/best",
         "--get-url",
         "--no-playlist",
-        url
-    ]
+    ] + _get_cookie_args() + [url]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     if result.returncode == 0 and result.stdout.strip():
         urls = [u for u in result.stdout.strip().split('\n') if u.startswith('http')]
