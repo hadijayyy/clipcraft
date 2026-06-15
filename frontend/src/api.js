@@ -28,6 +28,23 @@ export async function importYoutube(url) {
   return req('/api/youtube', { method: 'POST', body: form });
 }
 
+export async function importYoutubeDirect(url) {
+  const form = new FormData();
+  form.append('url', url);
+  return req('/api/youtube-direct', { method: 'POST', body: form });
+}
+
+export async function processDirect(id) {
+  return req(`/api/process-direct/${id}`, { method: 'POST' });
+}
+
+export async function clipDirect(id, start, end) {
+  const form = new FormData();
+  form.append('start', String(start));
+  form.append('end', String(end));
+  return req(`/api/clip-direct/${id}`, { method: 'POST', body: form });
+}
+
 export async function processVideo(id) {
   return req(`/api/process/${id}`, { method: 'POST' });
 }

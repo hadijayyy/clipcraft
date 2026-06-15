@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { uploadVideo, importYoutube } from '../api';
+import { uploadVideo, importYoutube, importYoutubeDirect } from '../api';
 
 export default function Upload() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState('file'); // file | youtube
+  const [tab, setTab] = useState('file'); // file | youtube | direct
   const [file, setFile] = useState(null);
   const [ytUrl, setYtUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,6 +39,20 @@ export default function Upload() {
     setLoading(false);
   };
 
+  const handleYtDirect = async () => {
+    if (!ytUrl.trim()) return;
+    setLoading(true);
+    setStatus('Connecting to YouTube...');
+    try {
+      const data = await importYoutubeDirect(ytUrl.trim());
+      setStatus('Transcribing audio...');
+      navigate(`/video/${data.id}`);
+    } catch (e) {
+      setStatus('Error: ' + e.message);
+    }
+    setLoading(false);
+  };
+
   return (
     <div className="max-w-xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Upload Video</h1>
@@ -54,7 +68,13 @@ export default function Upload() {
           onClick={() => setTab('youtube')}
           className={`flex-1 py-2 rounded-md text-sm font-medium transition ${tab === 'youtube' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
         >
-          📺 YouTube Link
+          📺 Download & Clip
+        </button>
+        <button
+          onClick={() => setTab('direct')}
+          className={`flex-1 py-2 rounded-md text-sm font-medium transition ${tab === 'direct' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
+        >
+          ⚡ Direct Link
         </button>
       </div>
 
@@ -94,7 +114,7 @@ export default function Upload() {
 
         {tab === 'youtube' && (
           <div>
-            <p className="text-sm text-slate-400 mb-3">Paste any YouTube video URL</p>
+            <p className="text-sm text-slate-400 mb-3">Download full video, then clip (saves to library)</p>
             <input
               className="input mb-4"
               placeholder="https://youtube.com/watch?v=..."
@@ -102,7 +122,28 @@ export default function Upload() {
               onChange={e => setYtUrl(e.target.value)}
             />
             <button onClick={handleYtImport} disabled={!ytUrl.trim() || loading} className="btn w-full text-center">
-              {loading ? status || 'Downloading...' : 'Import & Process'}
+              {loading ? status || 'Downloading...' : 'Download & Process'}
+            </button>
+          </div>
+        )}
+
+        {tab === 'direct' && (
+          <div>
+            <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4 mb-4">
+              <p className="text-sm text-emerald-300 font-medium mb-1">⚡ Direct Link Mode</p>
+              <p className="text-xs text-slate-400">
+                Paste a YouTube link → transcribe audio only → clip directly from URL.
+                <strong className="text-emerald-300"> No full video download.</strong> Saves storage!
+              </p>
+            </div>
+            <input
+              className="input mb-4"
+              placeholder="https://youtube.com/watch?v=..."
+              value={ytUrl}
+              onChange={e => setYtUrl(e.target.value)}
+            />
+            <button onClick={handleYtDirect} disabled={!ytUrl.trim() || loading} className="btn w-full text-center bg-emerald-600 hover:bg-emerald-500">
+              {loading ? status || 'Connecting...' : '⚡ Import Direct'}
             </button>
           </div>
         )}
@@ -111,7 +152,9 @@ export default function Upload() {
       {status && loading && (
         <div className="card mt-4 text-center">
           <p className="text-slate-300">{status}...</p>
-          <p className="text-sm text-slate-500 mt-1">This may take a few minutes for long videos</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {tab === 'direct' ? 'Only downloading audio (~5MB)' : 'This may take a few minutes for long videos'}
+          </p>
         </div>
       )}
     </div>

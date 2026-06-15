@@ -10,9 +10,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session
 
 from models.database import init_db, get_db, Video, Clip, StyleExample
-from processing.transcriber import extract_audio, transcribe, get_video_duration, get_video_info
+from processing.transcriber import extract_audio, transcribe, get_video_duration, get_video_info, extract_audio_from_url, get_youtube_duration
 from processing.analyzer import analyze_moments, get_hooks
-from processing.clipper import create_vertical_clip, create_split_clips
+from processing.clipper import create_vertical_clip, create_split_clips, create_vertical_clip_from_youtube
 from processing.subtitles import segments_to_srt, save_srt
 from processing.style_learner import save_style, load_all_styles, delete_style, learn_from_example
 
@@ -114,6 +114,105 @@ async def import_youtube(url: str = Form(...), db: Session = Depends(get_db)):
     db.refresh(video)
     
     return {"id": video.id, "filename": filename, "duration": duration, "status": "uploaded"}
+
+# ─── YouTube Direct Link (no full download) ─────────────
+@app.post("/api/youtube-direct")
+async def youtube_direct(url: str = Form(...), db: Session = Depends(get_db)):
+    """Import YouTube video without downloading full file.
+    Only downloads audio for transcription. Clips are made directly from URL."""
+    video_id = str(uuid.uuid4())[:8]
+    
+    # Get duration from URL (no download)
+    duration = get_youtube_duration(url)
+    
+    video = Video(
+        filename=f"{video_id}_stream",
+        original_name=f"YouTube Direct - {url[:50]}",
+        source="youtube_direct",
+        source_url=url,
+        duration=duration,
+        status="uploaded"
+    )
+    db.add(video)
+    db.commit()
+    db.refresh(video)
+    
+    return {"id": video.id, "duration": duration, "status": "uploaded", "mode": "direct"}
+
+# ─── Process Direct YouTube (audio only) ────────────────
+@app.post("/api/process-direct/{video_id}")
+def process_direct_youtube(video_id: int, db: Session = Depends(get_db)):
+    """Process YouTube video directly — only downloads audio, not full video."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(404, "Video not found")
+    if not video.source_url:
+        raise HTTPException(400, "No YouTube URL found")
+    
+    video.status = "processing"
+    db.commit()
+    
+    try:
+        # 1. Extract audio directly from URL (small download)
+        audio_path = extract_audio_from_url(video.source_url, str(video.id))
+        if not audio_path or not os.path.exists(audio_path):
+            raise Exception("Failed to extract audio from URL")
+        
+        # 2. Transcribe
+        transcript = transcribe(audio_path, str(video.id))
+        
+        # 3. Analyze for moments
+        moments = analyze_moments(transcript)
+        hooks = get_hooks(transcript)
+        
+        video.transcription = json.dumps(transcript)
+        video.moments_json = json.dumps({"moments": moments, "hooks": hooks})
+        video.status = "ready"
+        db.commit()
+        
+        return {
+            "status": "ready",
+            "transcript": transcript,
+            "moments": moments,
+            "hooks": hooks
+        }
+    except Exception as e:
+        video.status = "error"
+        db.commit()
+        raise HTTPException(500, str(e))
+
+# ─── Clip Direct from YouTube URL ──────────────────────
+@app.post("/api/clip-direct/{video_id}")
+def clip_direct_from_youtube(
+    video_id: int,
+    start: float = Form(...),
+    end: float = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Create clip directly from YouTube URL — no full video download."""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(404, "Video not found")
+    if not video.source_url:
+        raise HTTPException(400, "No YouTube URL found")
+    
+    output = os.path.join(CLIPS_DIR, f"clip_{video_id}_direct_{uuid.uuid4()[:6]}.mp4")
+    
+    try:
+        create_vertical_clip_from_youtube(video.source_url, output, start, end)
+        
+        clip = Clip(
+            video_id=video_id, clip_path=output,
+            start_time=start, end_time=end,
+            mode="direct"
+        )
+        db.add(clip)
+        db.commit()
+        db.refresh(clip)
+        
+        return {"id": clip.id, "path": output, "start": start, "end": end}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to create clip: {str(e)}")
 
 # ─── Process (Transcribe + Analyze) ───────────────────────
 @app.post("/api/process/{video_id}")

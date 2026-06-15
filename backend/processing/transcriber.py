@@ -3,11 +3,74 @@ import os
 import json
 import subprocess
 import numpy as np
+import tempfile
 
 STORAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage")
 AUDIO_DIR = os.path.join(STORAGE_DIR, "audio")
 
 os.makedirs(AUDIO_DIR, exist_ok=True)
+
+
+def get_youtube_stream_url(url: str) -> str:
+    """Get direct stream URL from YouTube using yt-dlp (no download)"""
+    cmd = [
+        "yt-dlp",
+        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--get-url",
+        "--no-playlist",
+        url
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().split('\n')[0]
+    return ""
+
+
+def extract_audio_from_url(url: str, audio_id: str) -> str:
+    """Extract audio directly from YouTube URL (no full video download)"""
+    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.wav")
+    if os.path.exists(audio_path):
+        return audio_path
+
+    # Get stream URL
+    stream_url = get_youtube_stream_url(url)
+    if not stream_url:
+        return ""
+
+    # Extract audio directly from stream
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", stream_url,
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        audio_path
+    ]
+    subprocess.run(cmd, capture_output=True, timeout=600)
+    return audio_path
+
+
+def get_youtube_duration(url: str) -> float:
+    """Get video duration from YouTube URL without downloading"""
+    cmd = [
+        "yt-dlp",
+        "--get-duration",
+        "--no-playlist",
+        url
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode == 0:
+        duration_str = result.stdout.strip()
+        # Parse HH:MM:SS or seconds
+        parts = duration_str.split(':')
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        else:
+            return float(parts[0])
+    return 0
 
 def extract_audio(video_path: str, audio_id: str) -> str:
     """Extract audio from video file using FFmpeg"""

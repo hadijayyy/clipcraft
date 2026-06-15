@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getVideo, processVideo, autoClip, manualClip, splitClip, getClips, videoStreamUrl, clipStreamUrl, thumbnailUrl } from '../api';
+import { getVideo, processVideo, processDirect, autoClip, manualClip, clipDirect, splitClip, getClips, videoStreamUrl, clipStreamUrl } from '../api';
 
 export default function VideoDetail() {
   const { id } = useParams();
@@ -18,6 +18,8 @@ export default function VideoDetail() {
   const [splitLength, setSplitLength] = useState(30);
   const [splitOverlap, setSplitOverlap] = useState(0.5);
 
+  const isDirect = video?.source === 'youtube_direct';
+
   const load = async () => {
     const data = await getVideo(id);
     setVideo(data);
@@ -31,7 +33,11 @@ export default function VideoDetail() {
   const handleProcess = async () => {
     setProcessing(true);
     try {
-      await processVideo(id);
+      if (isDirect) {
+        await processDirect(id);
+      } else {
+        await processVideo(id);
+      }
       load();
     } catch (e) { alert('Error: ' + e.message); }
     setProcessing(false);
@@ -55,7 +61,11 @@ export default function VideoDetail() {
     }
     setClipping(true);
     try {
-      await manualClip(id, start, end);
+      if (isDirect) {
+        await clipDirect(id, start, end);
+      } else {
+        await manualClip(id, start, end);
+      }
       load();
     } catch (e) { alert('Error: ' + e.message); }
     setClipping(false);
@@ -76,10 +86,17 @@ export default function VideoDetail() {
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
+  const extractVideoId = (url) => {
+    if (!url) return null;
+    const match = url.match(/(?:v=|\.be\/)([a-zA-Z0-9_-]{11})/);
+    return match ? match[1] : null;
+  };
+
   if (loading) return <p className="text-slate-400">Loading...</p>;
   if (!video) return <p className="text-red-400">Video not found</p>;
 
   const moments = video.moments?.moments || [];
+  const ytVideoId = isDirect ? extractVideoId(video.source_url) : null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -88,11 +105,31 @@ export default function VideoDetail() {
         <div className="card mb-4">
           <h1 className="text-xl font-bold mb-1 truncate">{video.original_name}</h1>
           <p className="text-sm text-slate-400 mb-4">
-            {video.source === 'youtube' ? '📺 YouTube' : '📁 Upload'}
+            {isDirect ? '⚡ YouTube Direct' : video.source === 'youtube' ? '📺 YouTube' : '📁 Upload'}
             {' · '}{formatTime(video.duration)}
             {' · Status: '}<span className={video.status === 'ready' ? 'text-green-400' : 'text-yellow-400'}>{video.status}</span>
           </p>
-          <video src={videoStreamUrl(video.id)} controls className="w-full rounded-lg bg-black max-h-[500px]" />
+
+          {isDirect ? (
+            ytVideoId ? (
+              <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                <iframe
+                  src={`https://www.youtube.com/embed/${ytVideoId}`}
+                  className="absolute inset-0 w-full h-full rounded-lg"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <div className="bg-slate-800 rounded-lg p-8 text-center text-slate-400">
+                <p>📺 YouTube video preview</p>
+                <a href={video.source_url} target="_blank" rel="noopener noreferrer" className="text-violet-400 text-sm mt-2 inline-block">
+                  Open in YouTube →
+                </a>
+              </div>
+            )
+          ) : (
+            <video src={videoStreamUrl(video.id)} controls className="w-full rounded-lg bg-black max-h-[500px]" />
+          )}
         </div>
 
         {/* Actions */}
@@ -101,7 +138,7 @@ export default function VideoDetail() {
           <div className="flex flex-wrap gap-2">
             {video.status !== 'ready' && (
               <button onClick={handleProcess} disabled={processing} className="btn">
-                {processing ? 'Processing...' : '🔊 Transcribe & Analyze'}
+                {processing ? 'Processing...' : isDirect ? '🔊 Transcribe Audio Only' : '🔊 Transcribe & Analyze'}
               </button>
             )}
             {video.status === 'ready' && (
@@ -110,6 +147,9 @@ export default function VideoDetail() {
               </button>
             )}
           </div>
+          {isDirect && (
+            <p className="text-xs text-emerald-400 mt-2">⚡ Direct mode: only audio downloaded (~5MB)</p>
+          )}
         </div>
 
         {/* Transcript */}
@@ -165,7 +205,7 @@ export default function VideoDetail() {
             <input className="input" placeholder="End (s)" value={manualEnd} onChange={e => setManualEnd(e.target.value)} />
           </div>
           <button onClick={handleManualClip} disabled={clipping} className="btn w-full">
-            Create Manual Clip
+            {isDirect ? '⚡ Clip Direct from URL' : 'Create Manual Clip'}
           </button>
         </div>
 

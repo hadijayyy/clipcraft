@@ -2,10 +2,63 @@
 import os
 import subprocess
 import json
+from processing.transcriber import get_youtube_stream_url
 
 STORAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage")
 CLIPS_DIR = os.path.join(STORAGE_DIR, "clips")
 os.makedirs(CLIPS_DIR, exist_ok=True)
+
+
+def create_vertical_clip_from_url(
+    stream_url: str,
+    output_path: str,
+    start_time: float,
+    end_time: float,
+    target_width: int = 720,
+    target_height: int = 1280
+) -> str:
+    """Create a vertical 9:16 clip directly from a stream URL (YouTube) without downloading full video.
+    Uses -ss before -i for fast seeking."""
+    
+    # For streaming URLs, we use -ss before -i for fast seeking
+    # and download only the needed segment
+    duration = end_time - start_time
+    
+    # Simple approach: download segment, crop to vertical
+    # Use -ss (start) and -t (duration) for minimal download
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(start_time),
+        "-i", stream_url,
+        "-t", str(duration),
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-vf", f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black",
+        output_path
+    ]
+    
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    return output_path
+
+
+def create_vertical_clip_from_youtube(
+    youtube_url: str,
+    output_path: str,
+    start_time: float,
+    end_time: float,
+    target_width: int = 720,
+    target_height: int = 1280
+) -> str:
+    """Create clip directly from YouTube URL without downloading full video."""
+    stream_url = get_youtube_stream_url(youtube_url)
+    if not stream_url:
+        return ""
+    return create_vertical_clip_from_url(stream_url, output_path, start_time, end_time, target_width, target_height)
+
 
 def create_vertical_clip(
     input_path: str,
