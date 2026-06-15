@@ -1,0 +1,117 @@
+import { useState, useRef } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { clipStreamUrl, generateThumbnail, thumbnailUrl } from '../api';
+
+export default function ThumbnailMaker() {
+  const { id } = useParams();
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [seekTime, setSeekTime] = useState(0.5);
+  const [thumbUrl, setThumbUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSeek = (t) => {
+    setSeekTime(t);
+    if (videoRef.current) {
+      videoRef.current.currentTime = t;
+    }
+  };
+
+  const captureFrame = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    // Seek to exact time
+    video.currentTime = seekTime;
+    await new Promise(resolve => {
+      video.addEventListener('seeked', resolve, { once: true });
+      setTimeout(resolve, 2000);
+    });
+
+    canvas.width = video.videoWidth || 720;
+    canvas.height = video.videoHeight || 1280;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Save to backend
+    setLoading(true);
+    try {
+      const data = await generateThumbnail(id, seekTime);
+      setThumbUrl(thumbnailUrl(id) + '?t=' + Date.now());
+    } catch (e) {
+      alert('Error: ' + e.message);
+    }
+    setLoading(false);
+  };
+
+  const downloadThumb = () => {
+    if (!canvasRef.current) return;
+    const link = document.createElement('a');
+    link.download = `clip_${id}_thumb.jpg`;
+    link.href = canvasRef.current.toDataURL('image/jpeg', 0.9);
+    link.click();
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">🖼 Thumbnail Maker</h1>
+        <Link to={`/clip/${id}`} className="btn">← Back to Editor</Link>
+      </div>
+
+      <div className="card mb-4">
+        <div className="relative bg-black rounded-lg overflow-hidden mb-4" style={{ maxWidth: '360px', margin: '0 auto' }}>
+          <video
+            ref={videoRef}
+            src={clipStreamUrl(id)}
+            className="w-full aspect-[9/16]"
+            controls
+            preload="auto"
+            onLoadedMetadata={() => {
+              if (videoRef.current) videoRef.current.currentTime = seekTime;
+            }}
+          />
+        </div>
+
+        <div className="mb-4">
+          <label className="text-sm text-slate-400 mb-1 block">Seek to second: {seekTime.toFixed(1)}s</label>
+          <input
+            type="range"
+            min="0"
+            max="60"
+            step="0.1"
+            value={seekTime}
+            onChange={e => handleSeek(Number(e.target.value))}
+            className="w-full"
+          />
+          <div className="flex justify-between text-xs text-slate-500 mt-1">
+            <span>0s</span>
+            <span>60s</span>
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={captureFrame} disabled={loading} className="btn flex-1 text-center">
+            {loading ? 'Generating...' : '📸 Capture Frame'}
+          </button>
+          {thumbUrl && (
+            <button onClick={downloadThumb} className="btn bg-emerald-600 hover:bg-emerald-500 flex-1 text-center">
+              ⬇ Download
+            </button>
+          )}
+        </div>
+      </div>
+
+      <canvas ref={canvasRef} className="hidden" />
+
+      {thumbUrl && (
+        <div className="card text-center">
+          <h2 className="font-semibold mb-3">Generated Thumbnail</h2>
+          <img src={thumbUrl} alt="Thumbnail" className="rounded-lg max-w-[360px] mx-auto mb-3 shadow-lg" />
+          <a href={thumbUrl} download className="btn">⬇ Download JPEG</a>
+        </div>
+      )}
+    </div>
+  );
+}
