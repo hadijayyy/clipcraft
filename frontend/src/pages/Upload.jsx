@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { uploadVideo, importYoutube, importYoutubeDirect, uploadYoutubeCookies } from '../api';
 
 export default function Upload() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState('file'); // file | youtube | direct
+  const [tab, setTab] = useState('file');
   const [file, setFile] = useState(null);
   const [cookiesFile, setCookiesFile] = useState(null);
   const [ytUrl, setYtUrl] = useState('');
@@ -13,71 +13,99 @@ export default function Upload() {
   const [status, setStatus] = useState('');
   const [cookiesSaved, setCookiesSaved] = useState(false);
 
-  const handleFileUpload = async () => {
+  const abortRef = useRef(null);
+
+  const handleFileUpload = useCallback(async () => {
     if (!file) return;
     setLoading(true);
+    setProgress(0);
     setStatus('Uploading...');
     try {
-      const data = await uploadVideo(file, (p) => setProgress(p));
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const data = await uploadVideo(file, (p) => setProgress(p), { signal: controller.signal });
       setStatus('Processing...');
       navigate(`/video/${data.id}`);
     } catch (e) {
-      setStatus('Error: ' + e.message);
+      if (e.name !== 'AbortError') {
+        setStatus('Error: ' + e.message);
+      }
+    } finally {
+      setLoading(false);
+      abortRef.current = null;
     }
-    setLoading(false);
-  };
+  }, [file, navigate]);
 
-  const handleUploadCookies = async () => {
+  const handleUploadCookies = useCallback(async () => {
     if (!cookiesFile) return;
     setLoading(true);
     setStatus('Uploading cookies...');
     try {
-      await uploadYoutubeCookies(cookiesFile);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      await uploadYoutubeCookies(cookiesFile, { signal: controller.signal });
       setCookiesSaved(true);
       setStatus('Cookies saved! Now paste YouTube URL and import.');
     } catch (e) {
-      setStatus('Error: ' + e.message);
+      if (e.name !== 'AbortError') {
+        setStatus('Error: ' + e.message);
+      }
+    } finally {
+      setLoading(false);
+      abortRef.current = null;
     }
-    setLoading(false);
-  };
+  }, [cookiesFile]);
 
-  const handleYtImport = async () => {
+  const handleYtImport = useCallback(async () => {
     if (!ytUrl.trim()) return;
     setLoading(true);
+    setProgress(0);
     setStatus('Downloading from YouTube (720p-1080p)...');
     try {
-      const data = await importYoutube(ytUrl.trim());
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const data = await importYoutube(ytUrl.trim(), { signal: controller.signal });
       setStatus('Processing...');
       navigate(`/video/${data.id}`);
     } catch (e) {
-      const msg = e.message || '';
-      if (msg.includes('403') || msg.includes('bot')) {
-        setStatus('⚠️ YouTube bot detection! Upload cookies.txt above first.');
-      } else {
-        setStatus('Error: ' + msg);
+      if (e.name !== 'AbortError') {
+        const msg = e.message || '';
+        if (msg.includes('403') || msg.includes('bot')) {
+          setStatus('⚠️ YouTube bot detection! Upload cookies.txt above first.');
+        } else {
+          setStatus('Error: ' + msg);
+        }
       }
+    } finally {
+      setLoading(false);
+      abortRef.current = null;
     }
-    setLoading(false);
-  };
+  }, [ytUrl, navigate]);
 
-  const handleYtDirect = async () => {
+  const handleYtDirect = useCallback(async () => {
     if (!ytUrl.trim()) return;
     setLoading(true);
     setStatus('Connecting to YouTube...');
     try {
-      const data = await importYoutubeDirect(ytUrl.trim());
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const data = await importYoutubeDirect(ytUrl.trim(), { signal: controller.signal });
       setStatus('Transcribing audio...');
       navigate(`/video/${data.id}`);
     } catch (e) {
-      const msg = e.message || '';
-      if (msg.includes('403') || msg.includes('bot')) {
-        setStatus('⚠️ YouTube bot detection! Upload cookies.txt above first.');
-      } else {
-        setStatus('Error: ' + msg);
+      if (e.name !== 'AbortError') {
+        const msg = e.message || '';
+        if (msg.includes('403') || msg.includes('bot')) {
+          setStatus('⚠️ YouTube bot detection! Upload cookies.txt above first.');
+        } else {
+          setStatus('Error: ' + msg);
+        }
       }
+    } finally {
+      setLoading(false);
+      abortRef.current = null;
     }
-    setLoading(false);
-  };
+  }, [ytUrl, navigate]);
 
   return (
     <div className="max-w-xl mx-auto">
@@ -91,7 +119,7 @@ export default function Upload() {
         </div>
         <p className="text-xs text-slate-400 mb-3">
           If YouTube blocks download, export cookies from your browser and upload here.
-          <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noreferrer" className="text-violet-400 hover:underline ml-1">
+          <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noreferrer" className="text-violet-400 hover:underline ml-1" aria-label="Get cookies extension">
             Get extension →
           </a>
         </p>
@@ -100,31 +128,40 @@ export default function Upload() {
             <div className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 cursor-pointer hover:border-violet-500 truncate">
               {cookiesFile ? `✓ ${cookiesFile.name}` : '📄 Select cookies.txt'}
             </div>
-            <input type="file" accept=".txt" className="hidden" onChange={e => setCookiesFile(e.target.files[0])} />
+            <input type="file" accept=".txt" className="hidden" onChange={e => setCookiesFile(e.target.files[0])} aria-label="Select cookies.txt file" />
           </label>
-          <button onClick={handleUploadCookies} disabled={!cookiesFile || loading} className="btn text-sm">
+          <button onClick={handleUploadCookies} disabled={!cookiesFile || loading} className="btn text-sm" aria-label="Upload cookies file">
             Upload
           </button>
         </div>
       </div>
 
       {/* Tab Switcher */}
-      <div className="flex gap-1 mb-6 bg-slate-800 rounded-lg p-1">
+      <div className="flex gap-1 mb-6 bg-slate-800 rounded-lg p-1" role="tablist" aria-label="Import method">
         <button
           onClick={() => setTab('file')}
           className={`flex-1 py-2 rounded-md text-sm font-medium transition ${tab === 'file' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+          role="tab"
+          aria-selected={tab === 'file'}
+          aria-controls="tab-panel-file"
         >
           📁 Upload File
         </button>
         <button
           onClick={() => setTab('youtube')}
           className={`flex-1 py-2 rounded-md text-sm font-medium transition ${tab === 'youtube' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}
+          role="tab"
+          aria-selected={tab === 'youtube'}
+          aria-controls="tab-panel-youtube"
         >
           📺 YouTube URL
         </button>
         <button
           onClick={() => setTab('direct')}
           className={`flex-1 py-2 rounded-md text-sm font-medium transition ${tab === 'direct' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}
+          role="tab"
+          aria-selected={tab === 'direct'}
+          aria-controls="tab-panel-direct"
         >
           ⚡ Direct Link
         </button>
@@ -132,10 +169,14 @@ export default function Upload() {
 
       <div className="card">
         {tab === 'file' && (
-          <div>
+          <div id="tab-panel-file" role="tabpanel" aria-label="File upload">
             <div
               className="border-2 border-dashed border-slate-600 rounded-lg p-12 text-center cursor-pointer hover:border-violet-500 transition"
               onClick={() => document.getElementById('fileInput').click()}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); document.getElementById('fileInput').click(); }}}
+              role="button"
+              tabIndex={0}
+              aria-label="Click to select a video file"
             >
               {file ? (
                 <div>
@@ -149,38 +190,44 @@ export default function Upload() {
                   <p className="text-sm text-slate-500 mt-1">MP4, MOV, AVI, MKV — max 2GB</p>
                 </div>
               )}
-              <input id="fileInput" type="file" accept="video/*" className="hidden" onChange={e => setFile(e.target.files[0])} />
+              <input id="fileInput" type="file" accept="video/*" className="hidden" onChange={e => setFile(e.target.files[0])} aria-label="Video file input" />
             </div>
 
             {progress > 0 && progress < 100 && (
-              <div className="mt-4 bg-slate-700 rounded-full h-2">
-                <div className="bg-violet-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
+              <div className="mt-4" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
+                <div className="flex justify-between text-xs text-slate-400 mb-1">
+                  <span>Uploading... {progress}%</span>
+                </div>
+                <div className="bg-slate-700 rounded-full h-2">
+                  <div className="bg-violet-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                </div>
               </div>
             )}
 
-            <button onClick={handleFileUpload} disabled={!file || loading} className="btn w-full mt-4 text-center">
+            <button onClick={handleFileUpload} disabled={!file || loading} className="btn w-full mt-4 text-center" aria-label="Upload and process video">
               {loading ? status || 'Uploading...' : 'Upload & Process'}
             </button>
           </div>
         )}
 
         {tab === 'youtube' && (
-          <div>
+          <div id="tab-panel-youtube" role="tabpanel" aria-label="YouTube import">
             <p className="text-sm text-slate-400 mb-3">Download full video (720p-1080p) then clip. Saved to library.</p>
             <input
               className="input mb-4"
               placeholder="https://youtube.com/watch?v=..."
               value={ytUrl}
               onChange={e => setYtUrl(e.target.value)}
+              aria-label="YouTube video URL"
             />
-            <button onClick={handleYtImport} disabled={!ytUrl.trim() || loading} className="btn w-full text-center">
+            <button onClick={handleYtImport} disabled={!ytUrl.trim() || loading} className="btn w-full text-center" aria-label="Download and process YouTube video">
               {loading ? status || 'Downloading...' : '📥 Download & Process'}
             </button>
           </div>
         )}
 
         {tab === 'direct' && (
-          <div>
+          <div id="tab-panel-direct" role="tabpanel" aria-label="Direct link import">
             <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4 mb-4">
               <p className="text-sm text-emerald-300 font-medium mb-1">⚡ Direct Link Mode</p>
               <p className="text-xs text-slate-400">
@@ -193,8 +240,9 @@ export default function Upload() {
               placeholder="https://youtube.com/watch?v=..."
               value={ytUrl}
               onChange={e => setYtUrl(e.target.value)}
+              aria-label="YouTube video URL for direct import"
             />
-            <button onClick={handleYtDirect} disabled={!ytUrl.trim() || loading} className="btn w-full text-center bg-emerald-600 hover:bg-emerald-500">
+            <button onClick={handleYtDirect} disabled={!ytUrl.trim() || loading} className="btn w-full text-center bg-emerald-600 hover:bg-emerald-500" aria-label="Import YouTube video directly">
               {loading ? status || 'Connecting...' : '⚡ Import Direct'}
             </button>
           </div>
@@ -202,7 +250,7 @@ export default function Upload() {
       </div>
 
       {status && loading && (
-        <div className="card mt-4 text-center">
+        <div className="card mt-4 text-center" role="status" aria-live="polite">
           <p className="text-slate-300">{status}</p>
           <p className="text-sm text-slate-500 mt-1">
             {tab === 'direct' ? 'Only downloading audio (~5MB)' : 'This may take a few minutes for long videos'}
@@ -211,7 +259,7 @@ export default function Upload() {
       )}
 
       {status && !loading && status.includes('Error') && (
-        <div className="card mt-4 text-center border-red-500/30">
+        <div className="card mt-4 text-center border-red-500/30" role="alert">
           <p className="text-red-400">{status}</p>
         </div>
       )}
